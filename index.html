@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GIS Kelompok 4 - Final Stabil</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        /* Paksa Full Screen */
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #f8fafc;
+        }
+
+        #layout {
+            display: flex;
+            height: 100vh;
+            flex-direction: row;
+        }
+
+        /* Sidebar */
+        #sidebar {
+            width: 400px;
+            background: white;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 4px 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Map Wrapper */
+        #map-wrapper {
+            flex: 1;
+            position: relative;
+        }
+
+        /* Map Wajib Punya Height */
+        #map {
+            width: 100%;
+            height: 100%;
+            background: #ddd;
+            z-index: 1;
+        }
+
+        @media (max-width: 768px) {
+            #layout {
+                flex-direction: column-reverse;
+            }
+
+            #sidebar {
+                width: 100%;
+                height: 50%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="layout">
+        <div id="sidebar">
+            <div class="bg-indigo-700 text-white p-4">
+                <h1 class="font-bold text-lg"><i class="fa-solid fa-map"></i> Kelompok 4</h1>
+                <p class="text-xs text-indigo-200">Simulasi MongoDB $nearSphere</p>
+            </div>
+
+            <div class="p-4 border-b space-y-3 bg-gray-50">
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase">1. Lokasi (Geser Marker Biru)</label>
+                    <div id="info-lokasi" class="bg-white border p-2 text-xs font-mono rounded">Menunggu Peta...</div>
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase">2. Radius (Meter)</label>
+                    <input type="number" id="input-radius" value="1500" class="w-full border p-2 text-sm rounded">
+                </div>
+                <button onclick="window.appCariBaso()"
+                    class="w-full bg-indigo-600 hover:bg-indigo-800 text-white font-bold py-2 rounded text-sm transition">
+                    <i class="fa-solid fa-search"></i> 3. Cari Sekarang
+                </button>
+            </div>
+
+            <div id="list-hasil" class="flex-1 overflow-y-auto p-2">
+                <div class="text-center mt-10 text-gray-400 text-xs">
+                    Hasil pencarian akan muncul di sini.
+                </div>
+            </div>
+        </div>
+
+        <div id="map-wrapper">
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+
+    <script>
+        // --- DATABASE DUMMY (Gunakan var agar tidak error saat re-run) ---
+        var dataBaso = [
+            { nama: "Baso Mas Iqbal", lat: -6.170, lng: 106.820, rating: 4.8 },
+            { nama: "Baso Solo Samrat", lat: -6.175, lng: 106.825, rating: 4.5 },
+            { nama: "Baso Aci Akang", lat: -6.165, lng: 106.815, rating: 4.2 },
+            { nama: "Baso Malang Karapitan", lat: -6.180, lng: 106.830, rating: 4.6 },
+            { nama: "Warung Baso Pak De", lat: -6.172, lng: 106.810, rating: 4.9 },
+            { nama: "Baso Urat Joss", lat: -6.185, lng: 106.822, rating: 4.3 },
+            { nama: "Mie Ayam & Baso", lat: -6.160, lng: 106.835, rating: 4.0 }
+        ];
+
+        // Variabel Global untuk menyimpan instance
+        var myMap = null;
+        var userMarker = null;
+        var radiusCircle = null;
+        var resultLayer = new L.LayerGroup(); // Group khusus marker hasil
+
+        // --- FUNGSI UTAMA ---
+        function startApp() {
+            // 1. Cek Leaflet
+            if (typeof L === 'undefined') {
+                alert("Leaflet belum terload. Cek koneksi internet!");
+                return;
+            }
+
+            // 2. TEKNIK HARD RESET (PENTING UNTUK ONLINE EDITOR)
+            // Kita hancurkan peta lama jika ada, supaya tidak error "Map already initialized"
+            var container = document.getElementById('map');
+            if (container && container._leaflet_id) {
+                container._leaflet_id = null;
+            }
+            if (myMap) {
+                myMap.remove();
+                myMap = null;
+            }
+
+            // 3. Inisialisasi Peta Baru
+            console.log("Membuat Peta Baru...");
+            var startLat = -6.175392;
+            var startLng = 106.827153;
+
+            myMap = L.map('map', { zoomControl: false }).setView([startLat, startLng], 14);
+
+            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap'
+            }).addTo(myMap);
+
+            L.control.zoom({ position: 'topright' }).addTo(myMap);
+
+            // 4. Marker User (CSS Custom - Anti Gagal Load Gambar)
+            var iconUser = L.divIcon({
+                className: '',
+                html: '<div style="background:#4f46e5; width:24px; height:24px; border:3px solid white; border-radius:50%; box-shadow:0 2px 5px rgba(0,0,0,0.5);"></div>',
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+
+            userMarker = L.marker([startLat, startLng], { draggable: true, icon: iconUser }).addTo(myMap);
+
+            // 5. Lingkaran Radius
+            radiusCircle = L.circle([startLat, startLng], {
+                color: '#4f46e5',
+                fillColor: '#4f46e5',
+                fillOpacity: 0.1,
+                radius: 1500
+            }).addTo(myMap);
+
+            // Layer Group untuk hasil pencarian
+            resultLayer.addTo(myMap);
+
+            updateText(startLat, startLng);
+
+            // Event: Geser Marker
+            userMarker.on('drag', function (e) {
+                var pos = e.target.getLatLng();
+                radiusCircle.setLatLng(pos);
+                updateText(pos.lat, pos.lng);
+            });
+
+            // Paksa render ulang ukuran map
+            setTimeout(function () { myMap.invalidateSize(); }, 500);
+        }
+
+        function updateText(lat, lng) {
+            document.getElementById('info-lokasi').innerText = lat.toFixed(5) + ", " + lng.toFixed(5);
+        }
+
+        // --- FUNGSI PENCARIAN (Diakses Tombol HTML) ---
+        // Kita tempel ke window agar HTML button onclick bisa baca
+        window.appCariBaso = function () {
+            if (!myMap) return;
+
+            var userPos = userMarker.getLatLng();
+            var r = parseFloat(document.getElementById('input-radius').value);
+
+            radiusCircle.setRadius(r);
+            resultLayer.clearLayers(); // Hapus marker hasil lama
+            document.getElementById('list-hasil').innerHTML = "";
+
+            var ketemu = 0;
+            var htmlList = "";
+
+            // Loop Data
+            for (var i = 0; i < dataBaso.length; i++) {
+                var item = dataBaso[i];
+                var itemLoc = L.latLng(item.lat, item.lng);
+                var dist = userPos.distanceTo(itemLoc);
+
+                if (dist <= r) {
+                    ketemu++;
+
+                    // Marker Merah (CSS Custom)
+                    var iconBaso = L.divIcon({
+                        className: '',
+                        html: '<div style="background:#ef4444; width:16px; height:16px; border:2px solid white; border-radius:50%; box-shadow:0 2px 4px rgba(0,0,0,0.3);"></div>',
+                        iconSize: [16, 16],
+                        iconAnchor: [8, 8]
+                    });
+
+                    L.marker(itemLoc, { icon: iconBaso })
+                        .bindPopup("<b>" + item.nama + "</b><br>" + Math.round(dist) + "m")
+                        .addTo(resultLayer);
+
+                    // Tambah ke List
+                    htmlList += `
+                    <div class="border-b p-2 hover:bg-blue-50 cursor-pointer text-sm" onclick="window.zoomTo(${item.lat}, ${item.lng})">
+                        <div class="font-bold text-gray-700">${item.nama}</div>
+                        <div class="flex justify-between mt-1 text-xs text-gray-500">
+                            <span>${Math.round(dist)} meter</span>
+                            <span class="text-orange-500 font-bold">★ ${item.rating}</span>
+                        </div>
+                    </div>
+                `;
+                }
+            }
+
+            if (ketemu === 0) {
+                htmlList = '<div class="p-4 text-center text-red-400 text-sm">Tidak ada baso di radius ini.</div>';
+            }
+
+            document.getElementById('list-hasil').innerHTML = htmlList;
+        };
+
+        window.zoomTo = function (lat, lng) {
+            myMap.flyTo([lat, lng], 16);
+        };
+
+        // --- JALANKAN APLIKASI ---
+        // Gunakan timeout kecil untuk memastikan HTML siap
+        setTimeout(startApp, 100);
+
+    </script>
+
+</body>
+
+</html>
