@@ -105,16 +105,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 
     <script>
-        // --- DATABASE DUMMY (Gunakan var agar tidak error saat re-run) ---
-        var dataBaso = [
-            { nama: "Baso Mas Iqbal", lat: -6.170, lng: 106.820, rating: 4.8 },
-            { nama: "Baso Solo Samrat", lat: -6.175, lng: 106.825, rating: 4.5 },
-            { nama: "Baso Aci Akang", lat: -6.165, lng: 106.815, rating: 4.2 },
-            { nama: "Baso Malang Karapitan", lat: -6.180, lng: 106.830, rating: 4.6 },
-            { nama: "Warung Baso Pak De", lat: -6.172, lng: 106.810, rating: 4.9 },
-            { nama: "Baso Urat Joss", lat: -6.185, lng: 106.822, rating: 4.3 },
-            { nama: "Mie Ayam & Baso", lat: -6.160, lng: 106.835, rating: 4.0 }
-        ];
+        // --- KONFIGURASI API ---
+        // Pastikan backend berjalan di port 3000
+        var API_BASE_URL = 'http://localhost:3000/api';
 
         // Variabel Global untuk menyimpan instance
         var myMap = null;
@@ -195,7 +188,7 @@
 
         // --- FUNGSI PENCARIAN (Diakses Tombol HTML) ---
         // Kita tempel ke window agar HTML button onclick bisa baca
-        window.appCariBaso = function () {
+        window.appCariBaso = async function () {
             if (!myMap) return;
 
             var userPos = userMarker.getLatLng();
@@ -203,19 +196,32 @@
 
             radiusCircle.setRadius(r);
             resultLayer.clearLayers(); // Hapus marker hasil lama
-            document.getElementById('list-hasil').innerHTML = "";
+            document.getElementById('list-hasil').innerHTML = '<div class="text-center mt-10 text-gray-500 text-xs">Sedang mencari...</div>';
 
-            var ketemu = 0;
-            var htmlList = "";
+            try {
+                // Fetch data dari Backend API
+                const response = await fetch(`${API_BASE_URL}/locations/nearby?lat=${userPos.lat}&lng=${userPos.lng}&radius=${r}`);
 
-            // Loop Data
-            for (var i = 0; i < dataBaso.length; i++) {
-                var item = dataBaso[i];
-                var itemLoc = L.latLng(item.lat, item.lng);
-                var dist = userPos.distanceTo(itemLoc);
+                if (!response.ok) {
+                    throw new Error('Gagal mengambil data dari server');
+                }
 
-                if (dist <= r) {
+                const data = await response.json();
+
+                var ketemu = 0;
+                var htmlList = "";
+
+                // Loop Data dari API
+                data.forEach(item => {
                     ketemu++;
+
+                    // MongoDB GeoJSON format: [longitude, latitude]
+                    var lng = item.location.coordinates[0];
+                    var lat = item.location.coordinates[1];
+                    var itemLoc = L.latLng(lat, lng);
+
+                    // Hitung jarak untuk display
+                    var dist = userPos.distanceTo(itemLoc);
 
                     // Marker Merah (CSS Custom)
                     var iconBaso = L.divIcon({
@@ -231,7 +237,7 @@
 
                     // Tambah ke List
                     htmlList += `
-                    <div class="border-b p-2 hover:bg-blue-50 cursor-pointer text-sm" onclick="window.zoomTo(${item.lat}, ${item.lng})">
+                    <div class="border-b p-2 hover:bg-blue-50 cursor-pointer text-sm" onclick="window.zoomTo(${lat}, ${lng})">
                         <div class="font-bold text-gray-700">${item.nama}</div>
                         <div class="flex justify-between mt-1 text-xs text-gray-500">
                             <span>${Math.round(dist)} meter</span>
@@ -239,14 +245,24 @@
                         </div>
                     </div>
                 `;
+                });
+
+                if (ketemu === 0) {
+                    htmlList = '<div class="p-4 text-center text-red-400 text-sm">Tidak ada baso di radius ini.</div>';
                 }
-            }
 
-            if (ketemu === 0) {
-                htmlList = '<div class="p-4 text-center text-red-400 text-sm">Tidak ada baso di radius ini.</div>';
-            }
+                document.getElementById('list-hasil').innerHTML = htmlList;
 
-            document.getElementById('list-hasil').innerHTML = htmlList;
+            } catch (error) {
+                console.error("Error:", error);
+                document.getElementById('list-hasil').innerHTML = `
+                    <div class="p-4 text-center text-red-500 text-sm">
+                        <b>Gagal Koneksi!</b><br>
+                        Pastikan backend berjalan.<br>
+                        <span class="text-xs text-gray-400">${error.message}</span>
+                    </div>
+                `;
+            }
         };
 
         window.zoomTo = function (lat, lng) {
